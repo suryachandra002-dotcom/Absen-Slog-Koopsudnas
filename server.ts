@@ -198,19 +198,29 @@ function loadDatabase(): DatabaseSchema {
     }
   ];
 
-  // Seed sample attendance for today if empty
+  // Seed sample attendance for yesterday if completely empty; today's date ALWAYS starts empty (data kosong)
   let attendance: AttendanceRecord[] = db.attendance || [];
   if (attendance.length === 0) {
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const formatterYesterday = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const yesterdayStr = formatterYesterday.format(yesterday);
+
     attendance = [
       {
-        id: `ATT-${dateStr.replace(/-/g, '')}-520336`,
+        id: `ATT-${yesterdayStr.replace(/-/g, '')}-520336`,
         personnelId: 'PERS-001',
         personnelNrp: '520336',
         personnelNama: 'Fiyono, S.T., M.M.',
         personnelPangkat: 'Kolonel Kal',
         personnelJabatan: 'Waaslog Kaskoopsudnas',
         unit: 'Pimpinan Slog',
-        tanggal: dateStr,
+        tanggal: yesterdayStr,
         jamMasuk: '06:45:12',
         latMasuk: -6.262450,
         lngMasuk: 106.891150,
@@ -218,17 +228,17 @@ function loadDatabase(): DatabaseSchema {
         statusValidasiMasuk: 'valid',
         statusKehadiran: 'Hadir',
         keteranganKode: 'DD',
-        serverTimestamp: isoWIB
+        serverTimestamp: `${yesterdayStr}T06:45:12+07:00`
       },
       {
-        id: `ATT-${dateStr.replace(/-/g, '')}-523371`,
+        id: `ATT-${yesterdayStr.replace(/-/g, '')}-523371`,
         personnelId: 'PERS-002',
         personnelNrp: '523371',
         personnelNama: 'Agus Sutopo',
         personnelPangkat: 'Kolonel Tek',
         personnelJabatan: 'Paban I/Ren Slog Kaskoopsudnas',
         unit: 'Paban I/Ren',
-        tanggal: dateStr,
+        tanggal: yesterdayStr,
         jamMasuk: '06:52:40',
         latMasuk: -6.262520,
         lngMasuk: 106.891220,
@@ -236,21 +246,21 @@ function loadDatabase(): DatabaseSchema {
         statusValidasiMasuk: 'valid',
         statusKehadiran: 'Hadir',
         keteranganKode: 'DD',
-        serverTimestamp: isoWIB
+        serverTimestamp: `${yesterdayStr}T06:52:40+07:00`
       },
       {
-        id: `ATT-${dateStr.replace(/-/g, '')}-525881`,
+        id: `ATT-${yesterdayStr.replace(/-/g, '')}-525881`,
         personnelId: 'PERS-005',
         personnelNrp: '525881',
         personnelNama: 'Andi Wijaya',
         personnelPangkat: 'Kolonel Tum',
         personnelJabatan: 'Paban IV/Kons Slog Kaskoopsudnas',
         unit: 'Paban IV/Kons',
-        tanggal: dateStr,
+        tanggal: yesterdayStr,
         statusKehadiran: 'Dinas Luar',
         keteranganKode: 'DL',
         catatanKoreksi: 'Supervisi Faskon Lanud Atang Sendjaja',
-        serverTimestamp: isoWIB
+        serverTimestamp: `${yesterdayStr}T07:10:00+07:00`
       }
     ];
   }
@@ -792,6 +802,38 @@ async function startServer() {
     res.status(400).json({ error: 'Tipe absensi tidak valid' });
   });
 
+  // Reset Today's Attendance to Empty Data (Manual or Automated reset of today's records)
+  app.post('/api/attendance/reset-today', (req: Request, res: Response) => {
+    db = loadDatabase();
+    const { actorNama } = req.body;
+    const { dateStr, timeStr } = getWIBDate();
+
+    const todayRecords = db.attendance.filter(a => a.tanggal === dateStr);
+    const clearedCount = todayRecords.length;
+
+    // Retain previous days, clear only today's records
+    db.attendance = db.attendance.filter(a => a.tanggal !== dateStr);
+
+    appendAuditLog(db, {
+      actorId: 'ADMIN',
+      actorNama: actorNama || 'Administrator Slog',
+      actorRole: 'admin',
+      tindakan: 'RESET_REKAP_HARIAN',
+      target: `Presensi Tanggal ${dateStr}`,
+      detail: `Mengosongkan rekapitulasi presensi harian untuk tanggal ${dateStr} (${clearedCount} data dibersihkan). Data rekap hari ini berganti dengan data kosong.`,
+      status: 'SUCCESS'
+    });
+
+    saveDatabase(db);
+    res.json({
+      success: true,
+      message: `Rekapitulasi presensi harian tanggal ${dateStr} berhasil direset menjadi data kosong.`,
+      clearedCount,
+      date: dateStr,
+      time: timeStr
+    });
+  });
+
   // ---------------- ANNOUNCEMENTS (MAX 5 FIFO ENGINE) ----------------
   app.get('/api/announcements', (req: Request, res: Response) => {
     db = loadDatabase();
@@ -1295,6 +1337,29 @@ async function startServer() {
       });
     }
   }
+
+  // ---------------- AUTOMATIC MIDNIGHT (12 MALAM) DAY ROLLOVER TRACKER ----------------
+  // Starting at 00:00:00 WIB every night, daily attendance automatically switches to empty data
+  let lastWIBDate = getWIBDate().dateStr;
+  setInterval(() => {
+    const { dateStr, timeStr } = getWIBDate();
+    if (dateStr !== lastWIBDate) {
+      console.log(`[PERGANTIAN HARI 00:00 WIB] Tanggal berganti dari ${lastWIBDate} ke ${dateStr}. Rekap presensi harian otomatis berganti dengan data kosong.`);
+      lastWIBDate = dateStr;
+
+      const currentDb = loadDatabase();
+      appendAuditLog(currentDb, {
+        actorId: 'SYSTEM',
+        actorNama: 'Sistem Otomatis (Pergantian Hari 00:00 WIB)',
+        actorRole: 'admin',
+        tindakan: 'GANTI_HARI_OTOMATIS',
+        target: `Rekapitulasi Harian Tanggal ${dateStr}`,
+        detail: `Pukul 12 malam WIB terlampaui. Rekap presensi harian otomatis berganti dengan data kosong untuk tanggal baru ${dateStr}.`,
+        status: 'SUCCESS'
+      });
+      saveDatabase(currentDb);
+    }
+  }, 10000); // Poll every 10 seconds
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[DATA KEHADIRAN STAF LOGISTIK KOOPSUDNAS] Server running on http://0.0.0.0:${PORT}`);

@@ -146,6 +146,19 @@ export const api = {
     return res.json();
   },
 
+  async resetTodayAttendance(actorNama: string): Promise<{ success: boolean; message: string; clearedCount: number }> {
+    const res = await fetch(`${BASE_URL}/api/attendance/reset-today`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actorNama })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Gagal mereset absensi hari ini');
+    }
+    return res.json();
+  },
+
   // Announcements (Max 5 FIFO)
   async getAnnouncements(): Promise<Announcement[]> {
     const res = await fetch(`${BASE_URL}/api/announcements`);
