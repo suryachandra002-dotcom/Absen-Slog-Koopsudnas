@@ -1,0 +1,11 @@
+{
+  "name": "DATA KEHADIRAN STAF LOGISTIK KOOPSUDNAS",
+  "description": "Sistem Informasi Kehadiran Personel berbasis GPS dan Google Spreadsheet untuk Staf Logistik Komando Operasi Udara Nasional (Koopsudnas)",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
+
